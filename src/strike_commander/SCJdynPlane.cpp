@@ -503,6 +503,10 @@ void SCJdynPlane::checkStatus() {
         if (this->on_ground) {
             this->Cdp = 0.015f;
             this->min_throttle = 0;
+            /* reverse thrust is ground-only */
+            if (this->thrust < 0) {
+                this->thrust = 0;
+            }
         }
         this->on_ground = FALSE;
     } else if ((int) this->y <= this->groundlevel+2) {

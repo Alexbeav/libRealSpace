@@ -1006,7 +1006,10 @@ void SCStrike::checkKeyboard(void) {
     }
     
     if (m_keyboard->isActionPressed(CreateAction(InputAction::SIM_START, SimActionOfst::THROTTLE_DOWN))) {
-        if (this->player_plane->GetThrottle() > -30) {
+        // Negative throttle (reverse thrust) only exists with wheels on the
+        // runway; airborne the floor is idle.
+        int throttle_floor = this->player_plane->on_ground ? -30 : 0;
+        if (this->player_plane->GetThrottle() > throttle_floor) {
             this->player_plane->SetThrottle(this->player_plane->GetThrottle() - 1);
         }
         if (this->player_plane->GetThrottle() == 0) {
