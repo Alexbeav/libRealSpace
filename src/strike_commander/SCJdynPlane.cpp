@@ -1,8 +1,9 @@
 #include "precomp.h"
 #include "../engine/gametimer.h"
 
-const float GRAVITY = 9.80f; // m/s^2
-const float AIR_DENSITY = 1.225f; // kg/m^3
+/* World units are feet/pounds (original Strike Commander entity data). */
+const float GRAVITY = 32.17f;                     // ft/s^2
+const float FPS_TO_KNOTS = 3600.0f / 6082.0f;     // ft/s -> knots
 const float DRAG_COEFFICIENT = 0.47f;
 const float MAX_LIFT_COEFFICIENT = 2.0f; // Coefficient de portance maximum
 const float LIFT_COEFFICIENT = 0.5f; // Doit être ajusté en fonction de la forme de l'objet
@@ -69,7 +70,16 @@ SCJdynPlane::SCJdynPlane(float LmaxDEF, float LminDEF, float Fmax, float Smax, f
     this->y = y;
     this->z = z;
     this->Cdp = .015f;
-    this->ro2 = 0.5f * (AIR_DENSITY - 0.000112f * this->y / 1000.0f); // Approximation atmosphère standard;
+    {
+        /* imperial density table, see updateSpeedOfSound() */
+        int alt_index = ((int)this->y) >> 10;
+        if (alt_index > 74) {
+            alt_index = 74;
+        } else if (alt_index < 0) {
+            alt_index = 0;
+        }
+        this->ro2 = 0.5f * ro[alt_index];
+    }
     this->ipi_AR = 1.0f / ((float)M_PI * this->b * this->b / this->s);
     this->ie_pi_AR = 0.83f * this->ipi_AR;
     this->wheels = 1;
@@ -98,7 +108,7 @@ void SCJdynPlane::Simulate() {
     this->tps = (uint32_t)(ftps + 0.5f);
 
     this->gravity = GRAVITY * dt * dt;
-    this->fps_knots = 1.944f / dt;
+    this->fps_knots = FPS_TO_KNOTS / dt;
     this->groundlevel = this->area->getY(this->x, this->z);
     this->computeGravity();
     this->processInput();
@@ -114,9 +124,9 @@ void SCJdynPlane::Simulate() {
 
     // Calculer la distance parcourue depuis la dernière frame
     
-    float vitesse_ms = abs(this->vz) / dt;
-    this->airspeed = (int)(vitesse_ms * 1.944f);
-    this->climbspeed = (short)(dt / (this->y - this->last_py));
+    float speed_fps = abs(this->vz) / dt;
+    this->airspeed = (int)(speed_fps * FPS_TO_KNOTS);
+    this->climbspeed = (short)((this->y - this->last_py) / dt);
     this->g_load = (this->lift_force*this->inverse_mass) / this->gravity;
     this->ax = this->acceleration.x*10.0f;
     this->ay = this->acceleration.y*10.0f;
@@ -458,10 +468,12 @@ void SCJdynPlane::updateSpeedOfSound() {
     int itemp {0};
     float dt = GameTimer::getInstance().getDeltaTime();
     
-    if (this->y <= 11000.0f) {
-        this->sos = -340.3f * dt + (340.3f - 295.0f) * dt / 11000.0f * this->y;
+    /* World units are feet (original game data): sea-level speed of sound
+       1116 ft/s, 968 ft/s above 36000 ft — same model as SCPlane. */
+    if (this->y <= 36000.0f) {
+        this->sos = (-1116.0f + (1116.0f - 968.0f) / 36000.0f * this->y) * dt;
     } else {
-        this->sos = -295.0f * dt;
+        this->sos = -968.0f * dt;
     }
     itemp = ((int)this->y) >> 10;
     if (itemp > 74) {
@@ -469,7 +481,10 @@ void SCJdynPlane::updateSpeedOfSound() {
     } else if (itemp < 0) {
         itemp = 0;
     }
-    this->ro2 = 0.5f * (AIR_DENSITY - 0.000112f * this->y / 1000.0f); // Approximation atmosphère standard;
+    /* US standard atmosphere table in slugs/ft^3 (see SCPlane.h) — the
+       metric 1.225 kg/m^3 constant used before is numerically ~515x the
+       imperial sea-level density and drowned the plane in drag/lift. */
+    this->ro2 = 0.5f * ro[itemp];
     if (this->Cl < .2) {
         this->mcc = .7166666f + .1666667f * this->Cl;
     } else {
