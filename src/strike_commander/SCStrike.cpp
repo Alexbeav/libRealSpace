@@ -1810,9 +1810,16 @@ void SCStrike::runFrame(void) {
             for (auto flags: this->current_mission->gameflow_registers) {
                 GameState.missions_flags.push_back(flags.second);
             }
-            //GameState.cash = GameState.proj_cash + this->current_mission->gameflow_registers[1]*1000;
-            GameState.proj_cash = GameState.proj_cash + this->current_mission->gameflow_registers[1]*1000 - GameState.over_head - GameState.weapons_costs - GameState.f16_replacements ;
+            // Mission settlement: weapons and F-16 replacements were already
+            // deducted from proj_cash when purchased/incurred, so charging
+            // them again here double-billed the player (in mismatched units:
+            // purchases were deducted as cost*1000, this line re-deducted the
+            // raw accumulator). Only the mission payment and the recurring
+            // overhead settle here.
+            GameState.proj_cash = GameState.proj_cash + this->current_mission->gameflow_registers[1]*1000 - GameState.over_head;
+            GameState.cash = GameState.proj_cash;
             GameState.weapons_costs = 0;
+            GameState.f16_replacements = 0;
             GameState.mission_flyed_success[GameState.mission_flyed] = this->current_mission->gameflow_registers[0]>0;
             //GameState.kill_board[PilotsId::PLAYER][KillBoardType::AIR_KILL] += this->current_mission->player->plane_down;
             //GameState.kill_board[PilotsId::PLAYER][KillBoardType::GROUND_KILL] += this->current_mission->player->ground_down;
