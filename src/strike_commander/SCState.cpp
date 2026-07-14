@@ -24,7 +24,7 @@ void SCState::Load(std::string filename) {
 
     std::vector<uint8_t> buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
-    if (buffer.size() < 0x24E) {
+    if (buffer.size() < 0x24F) {
         std::cerr << "File size is too small: " << filename << std::endl;
         this->Reset();
         return;
@@ -35,6 +35,13 @@ void SCState::Load(std::string filename) {
         this->Reset();
         return;
     }
+    // Pad short files (saves written by older builds were 0x251 bytes) up to
+    // the original game's size, then keep the raw bytes so Save() can
+    // round-trip fields we don't parse yet.
+    if (buffer.size() < SAVE_FILE_SIZE) {
+        buffer.resize(SAVE_FILE_SIZE, 0);
+    }
+    this->raw_save_buffer = buffer;
     for (int i=0; i<256; i++) {
         this->requierd_flags[i] = buffer[0x0B + i];
     }
@@ -54,8 +61,12 @@ void SCState::Load(std::string filename) {
     */
     this->score = 0 | (buffer[0x24E] << 8) | buffer[0x24D];
     /*
-        019B - # of ground kills
         0199 - # of Air Kills
+        019B - # of ground kills
+        Orientation evidence: at campaign start the save's kill board holds a
+        30/6 pilot (36 total) — the manual's dossier gives TEX, a fighter-
+        squadron ace, "an unprecedented peacetime total of 36 confirmed
+        kills", so the 30 must be air kills and air comes first.
     */
     /*
         01C9 - 01DC - Player Last Name
@@ -80,13 +91,13 @@ void SCState::Load(std::string filename) {
     */
     this->wingman = std::string(buffer.begin() + 0x208, buffer.begin() + 0x21B);
     this->wingman.shrink_to_fit();
-    this->ground_kills = buffer[0x199];
-    this->air_kills = buffer[0x19B];
-    /* 19D - 1C5 killboard */
+    this->air_kills = buffer[0x199];
+    this->ground_kills = buffer[0x19B];
+    /* 19D - 1C5 killboard: per pilot {alive, ?, air lo, air hi, ground lo, ground hi} */
     for (int i=0; i<6; i++) {
         int alive = buffer[0x19D + i*0x06];
-        int ground_kills = (buffer[0x19D + i*0x06+3] << 8) | buffer[0x19D + i*0x06+2];
-        int air_kills = (buffer[0x19D + i*0x06+5] << 8) | buffer[0x19D + i*0x06+4];
+        int air_kills = (buffer[0x19D + i*0x06+3] << 8) | buffer[0x19D + i*0x06+2];
+        int ground_kills = (buffer[0x19D + i*0x06+5] << 8) | buffer[0x19D + i*0x06+4];
         this->pilot_roaster[i+1] = alive;
         this->kill_board[i+1][KillBoardType::AIR_KILL] = air_kills;
         this->kill_board[i+1][KillBoardType::GROUND_KILL] = ground_kills;
@@ -94,16 +105,19 @@ void SCState::Load(std::string filename) {
     this->kill_board[0][KillBoardType::AIR_KILL] = this->air_kills;
     this->kill_board[0][KillBoardType::GROUND_KILL] = this->ground_kills;
     
+    auto read16 = [&buffer](size_t offset) -> int16_t {
+        return (int16_t)((buffer[offset + 1] << 8) | buffer[offset]);
+    };
     this->weapon_inventory = {
-        {ID_AIM9J, buffer[0x16F]},
-        {ID_AIM9M, buffer[0x171]},
-        {ID_AGM65D, buffer[0x173]},
-        {ID_LAU3, buffer[0x17D]},
-        {ID_MK20, buffer[0x177]},
-        {ID_MK82, buffer[0x179]},
-        {ID_DURANDAL, buffer[0x175]},
-        {ID_GBU15, buffer[0x17B]},
-        {ID_AIM120, buffer[0x17F]}
+        {ID_AIM9J, read16(0x16F)},
+        {ID_AIM9M, read16(0x171)},
+        {ID_AGM65D, read16(0x173)},
+        {ID_LAU3, read16(0x17D)},
+        {ID_MK20, read16(0x177)},
+        {ID_MK82, read16(0x179)},
+        {ID_DURANDAL, read16(0x175)},
+        {ID_GBU15, read16(0x17B)},
+        {ID_AIM120, read16(0x17F)}
     };
     this->current_mission = buffer[0x08];
     this->mission_id = buffer[0x09];
@@ -112,12 +126,17 @@ void SCState::Load(std::string filename) {
 }
 
 void SCState::Save(std::string filename) {
-    std::vector<uint8_t> buffer(0x251, 0); // Create buffer with enough space and initialize with zeros
+    // Start from the last loaded save so unparsed bytes are preserved;
+    // fall back to a zeroed buffer at the original game's file size.
+    std::vector<uint8_t> buffer = this->raw_save_buffer;
+    if (buffer.size() != SAVE_FILE_SIZE) {
+        buffer.assign(SAVE_FILE_SIZE, 0);
+    }
 
-    // Write header
+    // Write header (original saves end it with 0x01, not 0xFF)
     std::string header = "SCB1.22";
     std::copy(header.begin(), header.end(), buffer.begin());
-    buffer[0x07] = 0xFF;
+    buffer[0x07] = 0x01;
     // Current mission, mission ID, and scene
     buffer[0x08] = this->current_mission;
     buffer[0x09] = this->mission_id;
@@ -141,9 +160,9 @@ void SCState::Save(std::string filename) {
     buffer[0x18D] = (this->over_head / 1000) & 0xFF;
     buffer[0x18E] = ((this->over_head / 1000) >> 8) & 0xFF;
 
-    // Kills
-    buffer[0x199] = this->ground_kills;
-    buffer[0x19B] = this->air_kills;
+    // Kills (0x199 air, 0x19B ground — see Load)
+    buffer[0x199] = this->air_kills;
+    buffer[0x19B] = this->ground_kills;
 
     // Kill board
     for (int i = 0; i < 6; i++) {
@@ -156,41 +175,39 @@ void SCState::Save(std::string filename) {
         buffer[0x19D + i*0x06 + 5] = (this->kill_board[i+1][KillBoardType::GROUND_KILL] >> 8) & 0xFF;
     }
 
-    // Weapon inventory
-    if (this->weapon_inventory.count(ID_AIM9J)) buffer[0x16F] = this->weapon_inventory[ID_AIM9J];
-    if (this->weapon_inventory.count(ID_AIM9M)) buffer[0x171] = this->weapon_inventory[ID_AIM9M];
-    if (this->weapon_inventory.count(ID_AGM65D)) buffer[0x173] = this->weapon_inventory[ID_AGM65D];
-    if (this->weapon_inventory.count(ID_DURANDAL)) buffer[0x175] = this->weapon_inventory[ID_DURANDAL];
-    if (this->weapon_inventory.count(ID_MK20)) buffer[0x177] = this->weapon_inventory[ID_MK20];
-    if (this->weapon_inventory.count(ID_MK82)) buffer[0x179] = this->weapon_inventory[ID_MK82];
-    if (this->weapon_inventory.count(ID_GBU15)) buffer[0x17B] = this->weapon_inventory[ID_GBU15];
-    if (this->weapon_inventory.count(ID_LAU3)) buffer[0x17D] = this->weapon_inventory[ID_LAU3];
-    if (this->weapon_inventory.count(ID_AIM120)) buffer[0x17F] = this->weapon_inventory[ID_AIM120];
+    // Weapon inventory (16-bit little-endian, see Load)
+    auto write16 = [&buffer](size_t offset, int16_t value) {
+        buffer[offset] = value & 0xFF;
+        buffer[offset + 1] = (value >> 8) & 0xFF;
+    };
+    if (this->weapon_inventory.count(ID_AIM9J)) write16(0x16F, this->weapon_inventory[ID_AIM9J]);
+    if (this->weapon_inventory.count(ID_AIM9M)) write16(0x171, this->weapon_inventory[ID_AIM9M]);
+    if (this->weapon_inventory.count(ID_AGM65D)) write16(0x173, this->weapon_inventory[ID_AGM65D]);
+    if (this->weapon_inventory.count(ID_DURANDAL)) write16(0x175, this->weapon_inventory[ID_DURANDAL]);
+    if (this->weapon_inventory.count(ID_MK20)) write16(0x177, this->weapon_inventory[ID_MK20]);
+    if (this->weapon_inventory.count(ID_MK82)) write16(0x179, this->weapon_inventory[ID_MK82]);
+    if (this->weapon_inventory.count(ID_GBU15)) write16(0x17B, this->weapon_inventory[ID_GBU15]);
+    if (this->weapon_inventory.count(ID_LAU3)) write16(0x17D, this->weapon_inventory[ID_LAU3]);
+    if (this->weapon_inventory.count(ID_AIM120)) write16(0x17F, this->weapon_inventory[ID_AIM120]);
 
-    // Player names
-    std::copy(this->player_name.begin(), 
-              this->player_name.length() > 19 ? this->player_name.begin() + 19 : this->player_name.end(), 
-              buffer.begin() + 0x1C9);
-
-    std::copy(this->player_firstname.begin(), 
-              this->player_firstname.length() > 19 ? this->player_firstname.begin() + 19 : this->player_firstname.end(), 
-              buffer.begin() + 0x1DD);
-
-    std::copy(this->player_callsign.begin(), 
-              this->player_callsign.length() > 19 ? this->player_callsign.begin() + 19 : this->player_callsign.end(), 
-              buffer.begin() + 0x1F1);
-
-    // Wingman
-    std::copy(this->wingman.begin(), 
-              this->wingman.length() > 19 ? this->wingman.begin() + 19 : this->wingman.end(), 
-              buffer.begin() + 0x208);
+    // Player names (zero the fixed-width fields first so a shorter name
+    // doesn't leave stale characters from the loaded buffer behind)
+    auto writeString = [&buffer](const std::string &value, size_t offset, size_t width) {
+        std::fill(buffer.begin() + offset, buffer.begin() + offset + width, 0);
+        size_t len = value.length() > width ? width : value.length();
+        std::copy(value.begin(), value.begin() + len, buffer.begin() + offset);
+    };
+    writeString(this->player_name, 0x1C9, 19);
+    writeString(this->player_firstname, 0x1DD, 19);
+    writeString(this->player_callsign, 0x1F1, 19);
+    writeString(this->wingman, 0x208, 19);
 
     buffer[0x24C] = this->tune_modifier;
     // Score
     buffer[0x24D] = this->score & 0xFF;
     buffer[0x24E] = (this->score >> 8) & 0xFF;
-    buffer[0x24F] = 0x00; // Padding byte
-    buffer[0x250] = 0x00; // Padding byte
+    // Bytes past 0x24E are not parsed yet; they are preserved from the
+    // loaded save via raw_save_buffer instead of being zeroed.
     // Write to file
     std::ofstream file(filename, std::ios::binary);
     if (!file) {
@@ -203,6 +220,7 @@ void SCState::Save(std::string filename) {
 }
 
 void SCState::Reset() {
+    this->raw_save_buffer.clear();
     this->requierd_flags.clear();
     this->mission_flyed_success.clear();
     this->missions_flags.clear();

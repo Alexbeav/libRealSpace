@@ -10,8 +10,13 @@
 
 class SCState {
 private:
-    inline static std::unique_ptr<SCState> s_instance{};    
+    inline static std::unique_ptr<SCState> s_instance{};
 public:
+    // Original save file size (SCB1.22, as written by DOS Strike Commander CD).
+    static constexpr size_t SAVE_FILE_SIZE = 0x255;
+    // Full raw bytes of the last loaded save; Save() patches known fields into
+    // this buffer so bytes we don't parse yet survive a load/save round-trip.
+    std::vector<uint8_t> raw_save_buffer;
     std::unordered_map<uint8_t, bool> requierd_flags;
     std::unordered_map<uint8_t, bool> mission_flyed_success;
     std::vector<int64_t> missions_flags;
