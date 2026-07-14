@@ -949,7 +949,10 @@ void LedgerScene::Render() {
         fb->printText(this->font, {177, 97}, std::to_string(GameState.over_head), color);
 
         fb->printText(this->font, {67, 103}, std::string("PROJ CASH"), color);
-        fb->printText(this->font, {177, 103}, std::to_string(GameState.proj_cash - GameState.over_head - GameState.weapons_costs - GameState.f16_replacements), color);
+        // Weapons and F-16 replacements are already deducted from
+        // proj_cash when they happen; the projection only subtracts the
+        // overhead still owed at the next mission settlement.
+        fb->printText(this->font, {177, 103}, std::to_string(GameState.proj_cash - GameState.over_head), color);
     } else if (page == 1) {
         int y = 64;
         for (auto weap : GameState.weapon_inventory) {
@@ -1120,8 +1123,11 @@ void CatalogueScene::placeOrder(std::vector<EFCT *> *script, uint8_t sprite_id) 
             break;
         }
     }
+    // Catalogue prices and proj_cash are both in dollars. Charge this
+    // order's cost exactly once; weapons_costs only accumulates what was
+    // spent since the last mission settlement for the accounts screen.
     GameState.weapons_costs += cost;
-    GameState.proj_cash = GameState.proj_cash - GameState.weapons_costs * 1000;
+    GameState.proj_cash = GameState.proj_cash - cost;
     this->onclick(nullptr, sprite_id);
 }
 std::vector<SCZone *> * CatalogueScene::UpdateZones() {
