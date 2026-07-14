@@ -317,6 +317,13 @@ void SCFileRequester::checkevents() {
         current_file = m_textEditor->getText();
     }
     
+    // Enter confirms the selected/typed file, like the on-screen button
+    if (m_keyboard->isKeyJustPressed(SDL_SCANCODE_RETURN) ||
+        m_keyboard->isKeyJustPressed(SDL_SCANCODE_KP_ENTER)) {
+        this->loadFile();
+        return;
+    }
+
     // Vérifier les actions au lieu des touches spécifiques
     if (m_keyboard->isActionJustPressed(InputAction::FILE_REQUESTER_CANCEL)) {
         this->opened = false;
