@@ -705,7 +705,10 @@ void SCJdynPlane::computeDrag() {
 void SCJdynPlane::computeGravity() {
     float dt = GameTimer::getInstance().getDeltaTime();
     
-    this->inverse_mass = 1.0f / (this->W + (this->fuel));
+    /* Forces are in pounds-force and W in pounds; mass in slugs is W/g,
+       so force -> acceleration is F * g / W. Without the g factor every
+       force (thrust, lift, drag) is ~32x too weak against gravity. */
+    this->inverse_mass = GRAVITY / (this->W + (this->fuel));
     this->gravity = GRAVITY *dt *dt;
     this->gravity_force = this->gravity * (this->W + (this->fuel));
 }
