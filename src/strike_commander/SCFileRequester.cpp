@@ -309,9 +309,10 @@ void SCFileRequester::draw(FrameBuffer *fb) {
     }
 }
 void SCFileRequester::checkevents() {
-    // Mettre à jour l'état des entrées
-    m_keyboard->update();
-    
+    // Note: GameEngine::pumpEvents() already runs m_keyboard->update() once
+    // per frame; updating again here cycles the key-state snapshots a second
+    // time and erases every just-pressed edge before we can read it.
+
     // Synchroniser notre variable current_file avec le contenu de l'éditeur
     if (m_isEditingText) {
         current_file = m_textEditor->getText();
