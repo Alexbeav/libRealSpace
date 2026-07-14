@@ -26,6 +26,8 @@ public:
     void fileUp();
     void fileDown();
     void loadFile();
+    // True if filename ends in .sav (any case)
+    static bool hasSaveExtension(const std::string &filename);
 
     SCButton* checkButtons(void);
     SCZone* checkZones();

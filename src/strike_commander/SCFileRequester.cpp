@@ -373,7 +373,7 @@ void SCFileRequester::loadFiles() {
     for (const auto &entry : std::filesystem::directory_iterator(".")) {
         if (entry.is_regular_file()) {
             std::string fileName = entry.path().filename().string();
-            if (fileName.size() >= 4 && (fileName.substr(fileName.size() - 4) == ".sav" || fileName.substr(fileName.size() - 4) == ".SAV")) {
+            if (hasSaveExtension(fileName)) {
                 files.push_back(fileName);
                 SCZone *zone = new SCZone();
                 zone->id = idx;
@@ -453,8 +453,31 @@ void SCFileRequester::selectFile(void *unused, int index) {
     m_textEditor->setText(current_file);
     this->selectd_file_index = index;
 }
+bool SCFileRequester::hasSaveExtension(const std::string &filename) {
+    if (filename.size() < 4) {
+        return false;
+    }
+    std::string ext = filename.substr(filename.size() - 4);
+    for (auto &c : ext) {
+        c = (char)tolower((unsigned char)c);
+    }
+    return ext == ".sav";
+}
+
 void SCFileRequester::loadFile() {
-    this->requested_file = this->current_file;    
+    deactivateTextEditor();
+    std::string filename = this->current_file;
+    if (filename.empty()) {
+        // Nothing typed or selected: keep the requester open instead of
+        // silently calling the callback with an unusable name.
+        return;
+    }
+    if (this->save_mode && !hasSaveExtension(filename)) {
+        // The load dialog only lists *.sav files; without this, saves
+        // written under a bare name never show up again.
+        filename += ".sav";
+    }
+    this->requested_file = filename;
     this->opened = false;
     this->callback(this->requested_file);
 }
