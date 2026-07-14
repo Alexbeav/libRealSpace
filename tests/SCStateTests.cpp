@@ -7,10 +7,23 @@
 #include <vector>
 
 // Layout reference: a real SCB1.22 save written by DOS Strike Commander CD
-// (597 bytes). Air/ground orientation cross-checked against the game manual:
-// the pre-seeded kill board contains a 30 air / 6 ground pilot, matching
-// TEX's documented "36 confirmed kills" fighter-squadron record.
+// (597 bytes). Air/ground orientation and pilot slot order verified against
+// the in-game KILL BOARD at campaign start (air/ground): PRIMETIME 30/6,
+// PHOENIX 11/27, BASELINE 12/18, ZORRO 22/13, TEX 16/17, VIXEN 19/16,
+// HAWK 33/48.
 namespace {
+
+struct BoardEntry { int air; int ground; };
+// Campaign-start kill board in PilotsId order (slots 1..7)
+static const BoardEntry kCampaignStartBoard[7] = {
+    {30, 6},  // PRIMETIME
+    {11, 27}, // PHOENIX
+    {12, 18}, // BASELINE
+    {22, 13}, // ZORRO
+    {16, 17}, // TEX
+    {19, 16}, // VIXEN
+    {33, 48}, // HAWK
+};
 
 std::vector<uint8_t> makeReferenceSave() {
     std::vector<uint8_t> b(SCState::SAVE_FILE_SIZE, 0);
@@ -26,10 +39,15 @@ std::vector<uint8_t> makeReferenceSave() {
     // player kills: 2 air, 0 ground
     b[0x199] = 2;
     b[0x19B] = 0;
-    // kill board slot 1: alive, 30 air, 6 ground (TEX's documented record)
-    b[0x19D] = 1;
-    b[0x19F] = 30; b[0x1A0] = 0;
-    b[0x1A1] = 6;  b[0x1A2] = 0;
+    // kill board: 7 wingmen, {alive, ?, air lo, air hi, ground lo, ground hi}
+    for (int i = 0; i < 7; i++) {
+        size_t o = 0x19D + i * 6;
+        b[o] = 1;
+        b[o + 2] = kCampaignStartBoard[i].air & 0xFF;
+        b[o + 3] = (kCampaignStartBoard[i].air >> 8) & 0xFF;
+        b[o + 4] = kCampaignStartBoard[i].ground & 0xFF;
+        b[o + 5] = (kCampaignStartBoard[i].ground >> 8) & 0xFF;
+    }
     // inventory: 38 AIM-9J
     b[0x16F] = 38; b[0x170] = 0;
     // names
@@ -73,15 +91,23 @@ TEST(SCStateTest, Load_ParsesOriginalSaveFields) {
     EXPECT_EQ(state.weapon_inventory[ID_AIM9J], 38);
 }
 
-TEST(SCStateTest, Load_AirKillsAtOffset199_GroundAt19B) {
+TEST(SCStateTest, Load_KillBoardMatchesInGameBoard) {
     SCState state;
     state.Load(writeTempSave(makeReferenceSave(), "scstate_kills.sav"));
 
     EXPECT_EQ(state.air_kills, 2);
     EXPECT_EQ(state.ground_kills, 0);
-    // Kill board slot 1 holds the 36-total ace: 30 air / 6 ground
-    EXPECT_EQ(state.kill_board[1][KillBoardType::AIR_KILL], 30);
-    EXPECT_EQ(state.kill_board[1][KillBoardType::GROUND_KILL], 6);
+    // All 7 wingmen, in PilotsId order, air-kills-first
+    for (int i = 0; i < 7; i++) {
+        EXPECT_EQ(state.kill_board[i + 1][KillBoardType::AIR_KILL],
+                  kCampaignStartBoard[i].air) << "pilot slot " << i + 1;
+        EXPECT_EQ(state.kill_board[i + 1][KillBoardType::GROUND_KILL],
+                  kCampaignStartBoard[i].ground) << "pilot slot " << i + 1;
+        EXPECT_EQ(state.pilot_roaster[i + 1], 1) << "pilot slot " << i + 1;
+    }
+    // HAWK is the 7th entry and must not be dropped
+    EXPECT_EQ(state.kill_board[PilotsId::HAWK][KillBoardType::AIR_KILL], 33);
+    EXPECT_EQ(state.kill_board[PilotsId::HAWK][KillBoardType::GROUND_KILL], 48);
 }
 
 TEST(SCStateTest, SaveLoad_RoundTripPreservesKills) {
@@ -89,8 +115,8 @@ TEST(SCStateTest, SaveLoad_RoundTripPreservesKills) {
     state.Load(writeTempSave(makeReferenceSave(), "scstate_rt_in.sav"));
     state.air_kills = 5;
     state.ground_kills = 3;
-    state.kill_board[2][KillBoardType::AIR_KILL] = 11;
-    state.kill_board[2][KillBoardType::GROUND_KILL] = 27;
+    state.kill_board[2][KillBoardType::AIR_KILL] = 99;
+    state.kill_board[2][KillBoardType::GROUND_KILL] = 77;
 
     std::string out = testing::TempDir() + "scstate_rt_out.sav";
     state.Save(out);
@@ -101,8 +127,10 @@ TEST(SCStateTest, SaveLoad_RoundTripPreservesKills) {
     EXPECT_EQ(reloaded.ground_kills, 3);
     EXPECT_EQ(reloaded.kill_board[1][KillBoardType::AIR_KILL], 30);
     EXPECT_EQ(reloaded.kill_board[1][KillBoardType::GROUND_KILL], 6);
-    EXPECT_EQ(reloaded.kill_board[2][KillBoardType::AIR_KILL], 11);
-    EXPECT_EQ(reloaded.kill_board[2][KillBoardType::GROUND_KILL], 27);
+    EXPECT_EQ(reloaded.kill_board[2][KillBoardType::AIR_KILL], 99);
+    EXPECT_EQ(reloaded.kill_board[2][KillBoardType::GROUND_KILL], 77);
+    EXPECT_EQ(reloaded.kill_board[PilotsId::HAWK][KillBoardType::AIR_KILL], 33);
+    EXPECT_EQ(reloaded.kill_board[PilotsId::HAWK][KillBoardType::GROUND_KILL], 48);
 }
 
 TEST(SCStateTest, Save_MatchesOriginalFormat) {

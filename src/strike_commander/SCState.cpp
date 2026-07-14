@@ -63,10 +63,11 @@ void SCState::Load(std::string filename) {
     /*
         0199 - # of Air Kills
         019B - # of ground kills
-        Orientation evidence: at campaign start the save's kill board holds a
-        30/6 pilot (36 total) — the manual's dossier gives TEX, a fighter-
-        squadron ace, "an unprecedented peacetime total of 36 confirmed
-        kills", so the 30 must be air kills and air comes first.
+        Orientation and slot order verified against the in-game KILL BOARD
+        of DOS Strike Commander CD at campaign start (air/ground):
+        PRIMETIME 30/6, PHOENIX 11/27, BASELINE 12/18, ZORRO 22/13,
+        TEX 16/17, VIXEN 19/16, HAWK 33/48 — matching PilotsId order and
+        air-kills-first byte layout.
     */
     /*
         01C9 - 01DC - Player Last Name
@@ -93,8 +94,9 @@ void SCState::Load(std::string filename) {
     this->wingman.shrink_to_fit();
     this->air_kills = buffer[0x199];
     this->ground_kills = buffer[0x19B];
-    /* 19D - 1C5 killboard: per pilot {alive, ?, air lo, air hi, ground lo, ground hi} */
-    for (int i=0; i<6; i++) {
+    /* 19D - 1C6 killboard: 7 wingmen (PRIMETIME..HAWK), per pilot
+       {alive, ?, air lo, air hi, ground lo, ground hi} */
+    for (int i=0; i<7; i++) {
         int alive = buffer[0x19D + i*0x06];
         int air_kills = (buffer[0x19D + i*0x06+3] << 8) | buffer[0x19D + i*0x06+2];
         int ground_kills = (buffer[0x19D + i*0x06+5] << 8) | buffer[0x19D + i*0x06+4];
@@ -164,8 +166,8 @@ void SCState::Save(std::string filename) {
     buffer[0x199] = this->air_kills;
     buffer[0x19B] = this->ground_kills;
 
-    // Kill board
-    for (int i = 0; i < 6; i++) {
+    // Kill board: 7 wingmen (PRIMETIME..HAWK), see Load
+    for (int i = 0; i < 7; i++) {
         buffer[0x19D + i*0x06] = this->pilot_roaster[i+1];
         // Write air kills
         buffer[0x19D + i*0x06 + 2] = this->kill_board[i+1][KillBoardType::AIR_KILL] & 0xFF;
